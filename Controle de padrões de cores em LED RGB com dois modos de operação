@@ -1,0 +1,544 @@
+/**
+
+ **********************************************************************************************************
+
+
+ * @file           : main.c
+
+
+ * @author         : Vinicius Santos, Tiago Nascimento e Alex Berrios
+
+
+ * @date           : 03/04/2025
+
+
+ **********************************************************************************************************
+
+
+  * @brief          : Código para controle de padrões de cores em LED RGB com dois modos de operação:
+
+
+
+ *                  - **Modo 1 (Padrão)**: O código inicia automaticamente no Padrão 1 de cores.
+
+
+
+ *                  - **Modo 2 (Aguardando Pressionamento)**: O código inicia com os LEDs apagados e
+
+
+
+ *                    somente começa a exibir as cores após o primeiro clique no botão.
+
+
+
+ ***********************************************************************************************************
+
+
+  * @attention      : Para ativar o **Modo 2**, basta remover os `/**` do bloco MODO DE OPERAÇÃO 2
+
+
+ *                  e comentar o bloco de código referente ao **Modo 1**.
+
+
+ * *********************************************************************************************************
+
+
+
+ * Copyright (c) 2025 STMicroelectronics.
+
+
+ * All rights reserved.
+
+
+ * This software is licensed under terms that can be found in the LICENSE file
+
+
+ * in the root directory of this software component.
+
+
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+
+
+ *
+
+
+ **********
+
+
+ */
+
+
+#include <stdint.h>
+
+
+#include <stm32h7a3xxq.h>
+
+
+#if !defined(_SOFT_FP) && defined(_ARM_FP)
+
+
+
+
+
+  #warning "FPU is not initialized, but the project is compiling for an FPU. Please initialize the FPU before use."
+
+
+
+
+#endif
+
+
+
+
+typedef struct {
+
+
+    char identificador[50];  // Nome do proprietário
+
+
+    uint8_t flagEV;          // Indica ocorrência de um novo evento
+
+
+    enum COR {PRETO, VERMELHO, VERDE, AZUL, AMARELO, CIANO, MAGENTA, BRANCO} cor_led;
+
+
+    uint32_t contador;       // Número de acionamentos do botão
+
+
+    uint8_t estado_leds[5][8]; // Matriz com 5 padrões de 8 cores cada
+
+
+} Perifericos_t;
+
+
+
+Perifericos_t LEDInterativo = {
+
+
+    "Vinicius", 0, PRETO, 0,
+
+
+    {
+
+
+        {0b00000010, 0b00001000, 0b00000001, 0b00000100,0b00001000, 0b00000001, 0b00000100, 0b00000001}, // Padrão 1
+
+
+        {0b00010000, 0b00000001, 0b10000000, 0b00000001,0b00001000, 0b00000001, 0b01000000, 0b00000001}, // Padrão 2
+
+
+        {0b10000000, 0b01000000, 0b00000001, 0b00000100,0b00001000, 0b00000001, 0b00100000, 0b00001000}, // Padrão 3
+
+
+        {0b00000001, 0b00001000, 0b10000000, 0b00000100,0b00000001, 0b00100000, 0b00000100, 0b00000001}, // Padrão 4
+
+
+        {0b01000000, 0b00000001, 0b01000000, 0b00000001,0b00100000, 0b00000001, 0b00000100, 0b00000001}  // Padrão 5
+
+
+    }
+
+
+};
+
+
+
+// Índices para o padrão e cor atual
+
+
+volatile uint8_t i = 0;
+
+
+static uint8_t j = 0;
+
+
+
+/** MODO DE OPERAÇÃO 2
+
+
+volatile uint8_t sistema_ativo = 0;  // Indica se o sistema foi ativado pelo botão
+
+
+*/
+
+
+
+void GPIO_Config(void);
+
+
+void EXTI_Config(void);
+
+
+void TIM6_Config(void);
+
+
+void EXTI15_10_IRQHandler(void);
+
+
+void TIM6_DAC1_IRQHandler(void);
+
+
+void Atualizar_LED(void);
+
+
+
+int main(void) {
+
+
+    GPIO_Config();
+
+
+    EXTI_Config();
+
+
+    TIM6_Config();
+
+
+
+    for (;;) {
+
+
+        if (LEDInterativo.flagEV) {
+
+
+            Atualizar_LED();
+
+
+            LEDInterativo.flagEV = 0;
+
+
+            j = (j + 1) % 8;   // Alterna entre as 8 cores do padrão atual
+
+
+        }
+
+
+    }
+
+
+}
+
+
+
+/* Configuração dos GPIOs */
+
+
+void GPIO_Config(void) {
+
+
+
+    // Habilita Clock para GPIOC (Botão) e GPIOD (LEDs)
+
+
+
+    RCC->AHB4ENR |= RCC_AHB4ENR_GPIOCEN | RCC_AHB4ENR_GPIODEN;
+
+
+
+
+
+    // Configura PD12, PD14 e PD15 como saída para LED RGB
+
+
+
+    GPIOD->MODER &= ~(GPIO_MODER_MODE12_Msk | GPIO_MODER_MODE14_Msk | GPIO_MODER_MODE15_Msk); // Limpa bits
+
+
+
+    GPIOD->MODER |= (GPIO_MODER_MODE12_0 | GPIO_MODER_MODE14_0 | GPIO_MODER_MODE15_0); // Define como saída
+
+
+
+
+
+    // Configura PC13 como entrada com pull-up (botão)
+
+
+
+    GPIOC->MODER &= ~GPIO_MODER_MODE13_Msk; // Configura PC13 como entrada
+
+
+
+    // Habilita PC13 como pull-down
+
+
+    	GPIOC->PUPDR &= ~(GPIO_PUPDR_PUPD13_0);
+
+
+    	GPIOC->PUPDR |= GPIO_PUPDR_PUPD13_Msk;
+
+
+}
+
+
+
+
+/* Configuração da Interrupção EXTI */
+
+
+void EXTI_Config(void) {
+
+
+
+    // Habilita Clock do SYSCFG
+
+
+    RCC->APB4ENR |= RCC_APB4ENR_SYSCFGEN;
+
+
+    // Conectar PC13 com EXTI13
+
+
+    SYSCFG->EXTICR[3] &= ~SYSCFG_EXTICR4_EXTI13_Msk;
+
+
+    SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI13_PC;
+
+
+    //desmascarar
+
+
+    EXTI->IMR1 |= EXTI_IMR1_IM13_Msk;
+
+
+    // Ativar a borda de subida e desativar borda de descida
+
+
+    EXTI->RTSR1 |= EXTI_RTSR1_TR13_Msk;
+
+
+    EXTI->FTSR1 &= ~EXTI_FTSR1_TR13_Msk;
+
+
+    // Configura NVIC (Prioridade 6)
+
+
+    NVIC_SetPriority(EXTI15_10_IRQn, 6);
+
+
+    NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+
+}
+
+
+
+/* Configuração do Timer TIM6 */
+
+
+void TIM6_Config(void) {
+
+
+    RCC->APB1LENR |= RCC_APB1LENR_TIM6EN;
+
+
+    TIM6->PSC = 64000 - 1;  // Prescaler para dividir clock de 64MHz para 1kHz
+
+
+    TIM6->ARR = 500 - 1;    // Contagem para 500ms (0.5s)
+
+
+    TIM6->DIER |= TIM_DIER_UIE;
+
+
+    TIM6->CR1 |= TIM_CR1_CEN;
+
+
+
+    NVIC_SetPriority(TIM6_DAC_IRQn, 2);
+
+
+    NVIC_EnableIRQ(TIM6_DAC_IRQn);
+
+
+}
+
+
+
+/* Interrupção do botão */
+
+
+void EXTI15_10_IRQHandler(void) {
+
+
+    if (EXTI->PR1 & EXTI_PR1_PR13) {
+
+
+        EXTI->PR1 = EXTI_PR1_PR13;   // Limpa flag
+
+
+
+   	 //MODO DE OPERAÇÃO 1
+
+
+        j = 0;
+
+
+        LEDInterativo.contador++;
+
+
+        i = (i + 1) % 5;   // Alterna entre os 5 padrões
+
+
+        LEDInterativo.flagEV = 1;
+
+
+    }
+
+
+}
+
+
+
+	/** MODO DE OPERAÇÃO 2
+
+
+        j = 0;
+
+
+        if (!sistema_ativo) {
+
+
+            sistema_ativo = 1;  // Ativa o sistema no primeiro pressionamento
+
+
+        } else {
+
+
+            LEDInterativo.contador++;
+
+
+            i = (i + 1) % 5;   // Alterna entre os 5 padrões
+
+
+        }
+
+
+
+        LEDInterativo.flagEV = 1;
+
+
+    }
+
+
+} */
+
+
+
+
+/* Interrupção do Timer TIM6 */
+
+
+void TIM6_DAC1_IRQHandler(void) {
+
+
+    if (TIM6->SR & TIM_SR_UIF) {
+
+
+        TIM6->SR &= ~TIM_SR_UIF;  // Limpa flag
+
+
+
+    //MODO DE OPERAÇÃO 1
+
+
+        LEDInterativo.flagEV = 1;
+
+
+
+    }
+
+
+  }
+
+
+
+        /** MODO DE OPERAÇÃO 2
+
+
+        if (sistema_ativo) {  // Só muda a cor se o sistema foi ativado
+
+
+            LEDInterativo.flagEV = 1;
+
+
+        }
+
+
+    }
+
+
+}*/
+
+
+
+/* Atualiza a cor do LED */
+
+
+void Atualizar_LED(void) {
+
+
+    uint8_t estado = LEDInterativo.estado_leds[i][j];
+
+
+
+    GPIOD->ODR &= ~(GPIO_ODR_OD12 | GPIO_ODR_OD14 | GPIO_ODR_OD15); //apaga
+
+
+
+    if (estado & 0b00000010) GPIOD->ODR |= GPIO_ODR_OD12; // Vermelho
+
+
+    if (estado & 0b00000100) GPIOD->ODR |= GPIO_ODR_OD14; //Verde
+
+
+    if (estado & 0b00001000) GPIOD->ODR |= GPIO_ODR_OD15; //Azul
+
+
+    if (estado & 0b00010000) GPIOD->ODR |= GPIO_ODR_OD12 | GPIO_ODR_OD14; //Amarelo
+
+
+    if (estado & 0b00100000) GPIOD->ODR |= GPIO_ODR_OD14 | GPIO_ODR_OD15; //Ciano
+
+
+    if (estado & 0b01000000) GPIOD->ODR |= GPIO_ODR_OD12 | GPIO_ODR_OD15; //Magenta
+
+
+    if (estado & 0b10000000) GPIOD->ODR |= GPIO_ODR_OD12 | GPIO_ODR_OD14 | GPIO_ODR_OD15; //Branco
+
+
+
+    switch (estado) {
+
+
+        case 0b00000001: LEDInterativo.cor_led = PRETO; break;
+
+
+        case 0b00000010: LEDInterativo.cor_led = VERMELHO; break;
+
+
+        case 0b00000100: LEDInterativo.cor_led = VERDE; break;
+
+
+        case 0b00001000: LEDInterativo.cor_led = AZUL; break;
+
+
+        case 0b00010000: LEDInterativo.cor_led = AMARELO; break;
+
+
+        case 0b00100000: LEDInterativo.cor_led = CIANO; break;
+
+
+        case 0b01000000: LEDInterativo.cor_led = MAGENTA; break;
+
+
+        case 0b10000000: LEDInterativo.cor_led = BRANCO; break;
+
+
+    }
+
+
+}
+
+
+

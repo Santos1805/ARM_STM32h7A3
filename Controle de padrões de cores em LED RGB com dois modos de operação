@@ -11,7 +11,7 @@
  *                    somente começa a exibir as cores após o primeiro clique no botão.
 
  ***********************************************************************************************************
-  * @attention      : Para ativar o **Modo 2**, basta remover os `/**` do bloco MODO DE OPERAÇÃO 2
+  * @attention      : Para ativar o **Modo 2**, basta remover os comentários do bloco MODO DE OPERAÇÃO 2
  *                  e comentar o bloco de código referente ao **Modo 1**.
  * *********************************************************************************************************
  * Copyright (c) 2025 STMicroelectronics.

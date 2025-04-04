@@ -7,7 +7,7 @@
 
   * @brief          : Código para controle de padrões de cores em LED RGB com dois modos de operação:
  *                  - **Modo 1 (Padrão)**: O código inicia automaticamente no Padrão 1 de cores.
- *                  - **Modo 2 (Aguardando Pressionamento)**: O código inicia com os LEDs apagados e
+ *                  - **Modo 2 (Aguardando Pressionamento)**: O código inicia com o LED apagado e
  *                    somente começa a exibir as cores após o primeiro clique no botão.
 
  ***********************************************************************************************************
